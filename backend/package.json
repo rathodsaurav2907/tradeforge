@@ -1,15 +1,18 @@
 {
   "name": "tradeforge-backend",
   "version": "1.0.0",
-  "description": "TradeForge Trading Engine & Express API",
+  "description": "TradeForge Trading Engine & Express API with Prisma ORM",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
     "test": "jest"
   },
   "dependencies": {
+    "@prisma/client": "^5.13.0",
     "axios": "^1.6.8",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -27,6 +30,7 @@
     "@types/node": "^20.12.7",
     "@types/pg": "^8.11.5",
     "@types/uuid": "^9.0.8",
+    "prisma": "^5.13.0",
     "tsx": "^4.7.2",
     "typescript": "^5.4.5"
   }

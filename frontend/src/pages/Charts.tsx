@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Sparkles, 
   TrendingUp, 
@@ -10,6 +10,7 @@ import {
   Sliders, 
   RefreshCw 
 } from 'lucide-react';
+import { createChart, ColorType, IChartApi, ISeriesApi } from 'lightweight-charts';
 import { Bar, AISignals, Quote, api } from '../services/api';
 
 interface ChartsProps {
@@ -23,6 +24,9 @@ export const Charts: React.FC<ChartsProps> = ({
   onSelectSymbol,
   quotes
 }) => {
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartInstanceRef = useRef<IChartApi | null>(null);
+
   const [bars, setBars] = useState<Bar[]>([]);
   const [signals, setSignals] = useState<AISignals | null>(null);
   const [loading, setLoading] = useState(true);
@@ -35,7 +39,6 @@ export const Charts: React.FC<ChartsProps> = ({
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Fetch historical bars with Python indicators & AI signals
       const [indRes, sigRes] = await Promise.all([
         api.getIndicators(selectedSymbol),
         api.getAISignals(selectedSymbol)
@@ -53,39 +56,155 @@ export const Charts: React.FC<ChartsProps> = ({
     fetchData();
   }, [selectedSymbol]);
 
+  // Mount & Update TradingView Lightweight Chart
+  useEffect(() => {
+    if (!chartContainerRef.current || bars.length === 0) return;
+
+    // Clean up any existing chart
+    if (chartInstanceRef.current) {
+      chartInstanceRef.current.remove();
+      chartInstanceRef.current = null;
+    }
+
+    const container = chartContainerRef.current;
+    const chart = createChart(container, {
+      width: container.clientWidth,
+      height: 380,
+      layout: {
+        background: { type: ColorType.Solid, color: '#0B0E14' },
+        textColor: '#94A3B8',
+        fontSize: 11,
+        fontFamily: "'JetBrains Mono', monospace"
+      },
+      grid: {
+        vertLines: { color: '#1F2430' },
+        horzLines: { color: '#1F2430' }
+      },
+      crosshair: {
+        vertLine: { color: '#00F0FF', width: 1, style: 3 },
+        horzLine: { color: '#00F0FF', width: 1, style: 3 }
+      },
+      timeScale: {
+        borderColor: '#2A3142',
+        timeVisible: true
+      },
+      rightPriceScale: {
+        borderColor: '#2A3142'
+      }
+    });
+
+    chartInstanceRef.current = chart;
+
+    // 1. Candlestick Series
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: '#00C076',
+      downColor: '#FF4D4F',
+      borderVisible: false,
+      wickUpColor: '#00C076',
+      wickDownColor: '#FF4D4F'
+    });
+
+    // 2. Volume Series
+    const volumeSeries = chart.addHistogramSeries({
+      color: '#26a69a',
+      priceFormat: { type: 'volume' },
+      priceScaleId: '', // Overlay over chart
+    });
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: { top: 0.8, bottom: 0 }
+    });
+
+    // Format bars for Lightweight Charts (requires sorted timestamps in YYYY-MM-DD format)
+    const formattedCandles = bars.map((b) => ({
+      time: b.timestamp.split('T')[0],
+      open: b.open,
+      high: b.high,
+      low: b.low,
+      close: b.close
+    }));
+
+    const formattedVolume = bars.map((b) => ({
+      time: b.timestamp.split('T')[0],
+      value: b.volume,
+      color: b.close >= b.open ? 'rgba(0, 192, 118, 0.25)' : 'rgba(255, 77, 79, 0.25)'
+    }));
+
+    candleSeries.setData(formattedCandles);
+    volumeSeries.setData(formattedVolume);
+
+    // 3. Technical Indicator Overlays
+    if (showIndicators.sma20) {
+      const smaSeries = chart.addLineSeries({
+        color: '#F59E0B',
+        lineWidth: 2,
+        title: 'SMA 20'
+      });
+      const smaData = bars
+        .filter((b) => b.sma_20 !== undefined && b.sma_20 !== null)
+        .map((b) => ({ time: b.timestamp.split('T')[0], value: b.sma_20! }));
+      smaSeries.setData(smaData);
+    }
+
+    if (showIndicators.ema9) {
+      const emaSeries = chart.addLineSeries({
+        color: '#00F0FF',
+        lineWidth: 2,
+        title: 'EMA 9'
+      });
+      const emaData = bars
+        .filter((b) => b.ema_9 !== undefined && b.ema_9 !== null)
+        .map((b) => ({ time: b.timestamp.split('T')[0], value: b.ema_9! }));
+      emaSeries.setData(emaData);
+    }
+
+    if (showIndicators.bollinger) {
+      const upperSeries = chart.addLineSeries({
+        color: '#A855F7',
+        lineWidth: 1,
+        lineStyle: 2,
+        title: 'BB Upper'
+      });
+      const lowerSeries = chart.addLineSeries({
+        color: '#A855F7',
+        lineWidth: 1,
+        lineStyle: 2,
+        title: 'BB Lower'
+      });
+
+      const upperData = bars
+        .filter((b) => b.bb_upper !== undefined && b.bb_upper !== null)
+        .map((b) => ({ time: b.timestamp.split('T')[0], value: b.bb_upper! }));
+      const lowerData = bars
+        .filter((b) => b.bb_lower !== undefined && b.bb_lower !== null)
+        .map((b) => ({ time: b.timestamp.split('T')[0], value: b.bb_lower! }));
+
+      upperSeries.setData(upperData);
+      lowerSeries.setData(lowerData);
+    }
+
+    chart.timeScale().fitContent();
+
+    // Responsive Resize Handler
+    const handleResize = () => {
+      if (chartContainerRef.current && chartInstanceRef.current) {
+        chartInstanceRef.current.applyOptions({
+          width: chartContainerRef.current.clientWidth
+        });
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (chartInstanceRef.current) {
+        chartInstanceRef.current.remove();
+        chartInstanceRef.current = null;
+      }
+    };
+  }, [bars, showIndicators]);
+
   const currentQuote = quotes.find(q => q.symbol === selectedSymbol);
-
-  // SVG Chart Dimensions & Scale calculations
-  const chartHeight = 300;
-  const chartWidth = 720;
-  const padding = { top: 20, right: 30, bottom: 30, left: 20 };
-
-  const minPrice = bars.length > 0 ? Math.min(...bars.map(b => b.low)) * 0.995 : 100;
-  const maxPrice = bars.length > 0 ? Math.max(...bars.map(b => b.high)) * 1.005 : 200;
-  const priceRange = maxPrice - minPrice || 1;
-
-  const getY = (val: number) => {
-    const norm = (val - minPrice) / priceRange;
-    return chartHeight - padding.bottom - norm * (chartHeight - padding.top - padding.bottom);
-  };
-
-  const getX = (index: number) => {
-    const usableWidth = chartWidth - padding.left - padding.right;
-    const step = bars.length > 1 ? usableWidth / (bars.length - 1) : 0;
-    return padding.left + index * step;
-  };
-
-  // Generate SVG paths for indicator lines
-  const generateLinePath = (key: 'sma_20' | 'ema_9' | 'bb_upper' | 'bb_lower') => {
-    if (!bars.length) return '';
-    return bars.reduce((path, bar, idx) => {
-      const val = bar[key];
-      if (val === undefined || val === null) return path;
-      const x = getX(idx);
-      const y = getY(val);
-      return idx === 0 || !path ? `M ${x} ${y}` : `${path} L ${x} ${y}`;
-    }, '');
-  };
 
   return (
     <div className="space-y-6">
@@ -127,13 +246,13 @@ export const Charts: React.FC<ChartsProps> = ({
         </div>
       </div>
 
-      {/* Main Grid: Technical Chart & AI Recommendations */}
+      {/* Main Grid: TradingView Chart & AI Recommendations */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Interactive Chart */}
+        {/* Left: TradingView Chart */}
         <div className="lg:col-span-2 bg-dark-800 p-5 rounded-2xl border border-dark-700 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-slate-400 font-semibold uppercase">Indicator Overlays:</span>
+              <span className="text-slate-400 font-semibold uppercase">TradingView Overlays:</span>
               <button
                 onClick={() => setShowIndicators(p => ({ ...p, sma20: !p.sma20 }))}
                 className={`px-2 py-0.5 rounded text-[11px] font-mono border ${showIndicators.sma20 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-dark-900 text-slate-500 border-dark-700'}`}
@@ -153,78 +272,20 @@ export const Charts: React.FC<ChartsProps> = ({
                 Bollinger Bands
               </button>
             </div>
-            <div className="text-[11px] font-mono text-slate-400">
-              60 Daily Candlesticks · Pandas Vectorized
+            <div className="text-[11px] font-mono text-slate-400 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-trade-green inline-block" />
+              TradingView Lightweight Charts
             </div>
           </div>
 
-          {/* SVG Candlestick Canvas */}
-          <div className="bg-dark-900 rounded-xl p-3 border border-dark-700/80 overflow-x-auto relative">
-            {loading ? (
-              <div className="h-[300px] flex items-center justify-center text-slate-400 text-sm">
+          {/* Canvas Container */}
+          <div className="bg-dark-900 rounded-xl p-2 border border-dark-700/80 overflow-hidden relative min-h-[380px]">
+            {loading && (
+              <div className="absolute inset-0 z-10 bg-dark-900/80 flex items-center justify-center text-slate-400 text-xs">
                 Calculating indicators with pandas & numpy...
               </div>
-            ) : (
-              <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full h-[320px] font-mono select-none">
-                {/* Horizontal Grid lines */}
-                {[0.25, 0.5, 0.75].map((pct, i) => {
-                  const yVal = minPrice + priceRange * pct;
-                  const y = getY(yVal);
-                  return (
-                    <g key={i}>
-                      <line x1={padding.left} y1={y} x2={chartWidth - padding.right} y2={y} stroke="#1F2430" strokeDasharray="3 3" />
-                      <text x={chartWidth - padding.right + 4} y={y + 3} fill="#64748B" fontSize="9">
-                        ${yVal.toFixed(1)}
-                      </text>
-                    </g>
-                  );
-                })}
-
-                {/* Candlesticks */}
-                {bars.map((b, i) => {
-                  const isUp = b.close >= b.open;
-                  const x = getX(i);
-                  const yHigh = getY(b.high);
-                  const yLow = getY(b.low);
-                  const yOpen = getY(b.open);
-                  const yClose = getY(b.close);
-                  const top = Math.min(yOpen, yClose);
-                  const height = Math.max(2, Math.abs(yClose - yOpen));
-                  const candleWidth = Math.max(3, (chartWidth / bars.length) * 0.65);
-                  const color = isUp ? '#00C076' : '#FF4D4F';
-
-                  return (
-                    <g key={i}>
-                      {/* Wick */}
-                      <line x1={x} y1={yHigh} x2={x} y2={yLow} stroke={color} strokeWidth="1" />
-                      {/* Real Body */}
-                      <rect
-                        x={x - candleWidth / 2}
-                        y={top}
-                        width={candleWidth}
-                        height={height}
-                        fill={color}
-                        rx="1"
-                      />
-                    </g>
-                  );
-                })}
-
-                {/* Overlays */}
-                {showIndicators.sma20 && (
-                  <path d={generateLinePath('sma_20')} fill="none" stroke="#F59E0B" strokeWidth="1.5" strokeOpacity="0.85" />
-                )}
-                {showIndicators.ema9 && (
-                  <path d={generateLinePath('ema_9')} fill="none" stroke="#00F0FF" strokeWidth="1.5" strokeOpacity="0.85" />
-                )}
-                {showIndicators.bollinger && (
-                  <>
-                    <path d={generateLinePath('bb_upper')} fill="none" stroke="#A855F7" strokeWidth="1" strokeDasharray="2 2" />
-                    <path d={generateLinePath('bb_lower')} fill="none" stroke="#A855F7" strokeWidth="1" strokeDasharray="2 2" />
-                  </>
-                )}
-              </svg>
             )}
+            <div ref={chartContainerRef} className="w-full h-[380px]" />
           </div>
 
           {/* Sub-panel: RSI Indicator */}

@@ -7,6 +7,22 @@ import { inMemoryStore, DEMO_USER_ID, DEMO_PORTFOLIO_ID } from '../db/database';
 import { AuthenticatedRequest } from '../middleware/auth.middleware';
 
 export class AuthController {
+  private static generateTokenPair(userId: string, email: string) {
+    const accessToken = jwt.sign(
+      { id: userId, email },
+      config.jwtSecret,
+      { expiresIn: config.accessTokenExpiry }
+    );
+
+    const refreshToken = jwt.sign(
+      { id: userId, email },
+      config.jwtRefreshSecret,
+      { expiresIn: config.refreshTokenExpiry }
+    );
+
+    return { accessToken, refreshToken };
+  }
+
   public static async register(req: Request, res: Response) {
     const { email, password, fullName } = req.body;
 
@@ -25,12 +41,14 @@ export class AuthController {
     const passwordHash = await bcrypt.hash(password, salt);
     const userId = uuidv4();
     const portfolioId = uuidv4();
+    const tokens = AuthController.generateTokenPair(userId, email.toLowerCase());
 
     const user = {
       id: userId,
       email: email.toLowerCase(),
       password_hash: passwordHash,
       full_name: fullName,
+      refresh_token: tokens.refreshToken,
       created_at: new Date()
     };
 
@@ -58,11 +76,10 @@ export class AuthController {
       created_at: new Date()
     });
 
-    const token = jwt.sign({ id: userId, email: user.email }, config.jwtSecret, { expiresIn: '7d' });
-
     return res.status(201).json({
       message: 'Account created successfully',
-      token,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
       user: {
         id: user.id,
         email: user.email,
@@ -91,7 +108,6 @@ export class AuthController {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
-    // For demo account, allow demo bypass
     if (foundUser.id !== DEMO_USER_ID) {
       const match = await bcrypt.compare(password, foundUser.password_hash);
       if (!match) {
@@ -99,17 +115,59 @@ export class AuthController {
       }
     }
 
-    const token = jwt.sign({ id: foundUser.id, email: foundUser.email }, config.jwtSecret, { expiresIn: '7d' });
+    const tokens = AuthController.generateTokenPair(foundUser.id, foundUser.email);
+    foundUser.refresh_token = tokens.refreshToken;
+    inMemoryStore.users.set(foundUser.id, foundUser);
 
     return res.json({
       message: 'Login successful',
-      token,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
       user: {
         id: foundUser.id,
         email: foundUser.email,
         fullName: foundUser.full_name
       }
     });
+  }
+
+  public static async refresh(req: Request, res: Response) {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'Refresh token is required.' });
+    }
+
+    try {
+      const decoded = jwt.verify(refreshToken, config.jwtRefreshSecret) as { id: string; email: string };
+      const user = inMemoryStore.users.get(decoded.id);
+
+      if (!user || user.refresh_token !== refreshToken) {
+        return res.status(403).json({ error: 'Invalid or revoked refresh token.' });
+      }
+
+      // Rotate tokens
+      const newTokens = AuthController.generateTokenPair(user.id, user.email);
+      user.refresh_token = newTokens.refreshToken;
+      inMemoryStore.users.set(user.id, user);
+
+      return res.json({
+        accessToken: newTokens.accessToken,
+        refreshToken: newTokens.refreshToken
+      });
+    } catch (err) {
+      return res.status(403).json({ error: 'Expired or invalid refresh token.' });
+    }
+  }
+
+  public static async logout(req: AuthenticatedRequest, res: Response) {
+    const userId = req.user?.id;
+    if (userId && inMemoryStore.users.has(userId)) {
+      const user = inMemoryStore.users.get(userId);
+      user.refresh_token = null;
+      inMemoryStore.users.set(userId, user);
+    }
+    return res.json({ message: 'Logged out successfully.' });
   }
 
   public static async getProfile(req: AuthenticatedRequest, res: Response) {
