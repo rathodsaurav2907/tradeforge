@@ -6,23 +6,32 @@ import { Charts } from './pages/Charts';
 import { PaperOrders } from './pages/PaperOrders';
 import { Portfolio } from './pages/Portfolio';
 import { Journal } from './pages/Journal';
-import { Quote, PortfolioSummary, api } from './services/api';
+import { KillSwitchModal } from './components/KillSwitchModal';
+import { BrokerSettingsModal } from './components/BrokerSettingsModal';
+import { Quote, PortfolioSummary, BrokerStatus, api } from './services/api';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [selectedSymbol, setSelectedSymbol] = useState<string>('RELIANCE');
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioSummary | null>(null);
+  const [brokerStatus, setBrokerStatus] = useState<BrokerStatus | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+
+  // Modals
+  const [showKillSwitch, setShowKillSwitch] = useState<boolean>(false);
+  const [showBrokerSettings, setShowBrokerSettings] = useState<boolean>(false);
 
   const fetchGlobalData = async () => {
     try {
-      const [quotesRes, portfolioRes] = await Promise.all([
+      const [quotesRes, portfolioRes, brokerRes] = await Promise.all([
         api.getQuotes(),
-        api.getPortfolioSummary()
+        api.getPortfolioSummary(),
+        api.getBrokerStatus()
       ]);
       setQuotes(quotesRes);
       setPortfolio(portfolioRes);
+      setBrokerStatus(brokerRes);
     } catch (err) {
       console.error('Failed to load live data', err);
     } finally {
@@ -32,10 +41,21 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     fetchGlobalData();
-    // Poll mock stream every 3.5 seconds
     const interval = setInterval(fetchGlobalData, 3500);
     return () => clearInterval(interval);
   }, []);
+
+  const handleToggleMode = async (newMode: 'PAPER' | 'LIVE') => {
+    try {
+      const res = await api.setBrokerMode(newMode);
+      setBrokerStatus(prev => prev ? { ...prev, mode: res.mode } : null);
+      await fetchGlobalData();
+    } catch (err: any) {
+      alert(err.response?.data?.error || err.message);
+    }
+  };
+
+  const currentMode = brokerStatus?.mode || 'PAPER';
 
   return (
     <div className="min-h-screen bg-dark-900 text-slate-100 flex flex-col font-sans">
@@ -44,7 +64,11 @@ export const App: React.FC = () => {
         setActiveTab={setActiveTab}
         quotes={quotes}
         portfolio={portfolio}
+        brokerStatus={brokerStatus}
         onRefresh={fetchGlobalData}
+        onToggleMode={handleToggleMode}
+        onOpenBrokerSettings={() => setShowBrokerSettings(true)}
+        onOpenKillSwitch={() => setShowKillSwitch(true)}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -79,6 +103,7 @@ export const App: React.FC = () => {
             onSelectSymbol={setSelectedSymbol}
             quotes={quotes}
             portfolio={portfolio}
+            mode={currentMode}
             onOrderPlaced={fetchGlobalData}
           />
         )}
@@ -97,25 +122,41 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Footer with Compliance Notice */}
+      {/* Modals */}
+      <KillSwitchModal
+        isOpen={showKillSwitch}
+        onClose={() => setShowKillSwitch(false)}
+        onExecuted={fetchGlobalData}
+      />
+
+      <BrokerSettingsModal
+        isOpen={showBrokerSettings}
+        onClose={() => setShowBrokerSettings(false)}
+        onUpdated={fetchGlobalData}
+      />
+
+      {/* Footer */}
       <footer className="border-t border-dark-800 bg-dark-900 py-6 text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 space-y-3">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="font-bold text-slate-300">TradeForge</span>
               <span>·</span>
-              <span>AI-Enhanced Paper Trading Terminal (NSE / BSE INR)</span>
+              <span>Institutional Algorithmic & Live Brokerage Terminal</span>
+              <span className="px-2 py-0.5 rounded text-[10px] bg-dark-800 border border-slate-700 text-trade-cyan font-mono">
+                {currentMode === 'LIVE' ? '🔴 LIVE BROKER' : '🟢 PAPER SIMULATION'}
+              </span>
             </div>
             <div className="flex items-center gap-4 text-[11px] font-mono">
-              <span>React + Vite</span>
+              <span>Zerodha Kite Connect v3</span>
               <span>·</span>
-              <span>Node.js Express + Prisma</span>
+              <span>Pre-Trade Risk Engine</span>
               <span>·</span>
-              <span>Python Poetry (Pandas & NumPy)</span>
+              <span>Emergency Kill Switch</span>
             </div>
           </div>
           <div className="text-[11px] text-slate-600 text-center sm:text-left leading-relaxed">
-            * Disclaimer: All market quotes are 15-minute delayed or simulated from permitted educational data feeds. All balances (₹10,00,000 INR starting capital), trades, and performance metrics are strictly virtual with no real financial liability. TradeForge is an educational technology demonstration.
+            * Live trading involves risk of capital loss. TradeForge enforces automated pre-trade risk controls (max ₹1,00,000 order ceiling, max daily loss limit, and emergency one-click kill-switch).
           </div>
         </div>
       </footer>

@@ -7,15 +7,28 @@ import {
   Layers, 
   ShieldCheck,
   AlertTriangle,
-  BookOpen 
+  Radio,
+  Briefcase,
+  AlertOctagon 
 } from 'lucide-react';
-import { Quote, OrderBook, OrderRecord, PortfolioSummary, formatINR, api } from '../services/api';
+import { 
+  Quote, 
+  OrderBook, 
+  OrderRecord, 
+  PortfolioSummary, 
+  BrokerFunds, 
+  BrokerPosition, 
+  BrokerHolding, 
+  formatINR, 
+  api 
+} from '../services/api';
 
 interface PaperOrdersProps {
   selectedSymbol: string;
   onSelectSymbol: (symbol: string) => void;
   quotes: Quote[];
   portfolio: PortfolioSummary | null;
+  mode: 'PAPER' | 'LIVE';
   onOrderPlaced: () => void;
 }
 
@@ -24,14 +37,24 @@ export const PaperOrders: React.FC<PaperOrdersProps> = ({
   onSelectSymbol,
   quotes,
   portfolio,
+  mode,
   onOrderPlaced
 }) => {
+  const isLive = mode === 'LIVE';
+
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
+  const [product, setProduct] = useState<'MIS' | 'CNC'>('MIS');
   const [orderType, setOrderType] = useState<'MARKET' | 'LIMIT' | 'STOP_LOSS'>('MARKET');
   const [quantity, setQuantity] = useState(10);
   const [limitPrice, setLimitPrice] = useState<number>(0);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [orderBook, setOrderBook] = useState<OrderBook | null>(null);
+
+  // Live Broker State
+  const [brokerFunds, setBrokerFunds] = useState<BrokerFunds | null>(null);
+  const [livePositions, setLivePositions] = useState<BrokerPosition[]>([]);
+  const [liveHoldings, setLiveHoldings] = useState<BrokerHolding[]>([]);
+
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
 
@@ -51,6 +74,17 @@ export const PaperOrders: React.FC<PaperOrdersProps> = ({
       ]);
       setOrders(ordersRes);
       setOrderBook(bookRes);
+
+      if (isLive) {
+        const [fundsRes, posRes, holdRes] = await Promise.all([
+          api.getBrokerFunds(),
+          api.getBrokerPositions(),
+          api.getBrokerHoldings()
+        ]);
+        setBrokerFunds(fundsRes);
+        setLivePositions(posRes);
+        setLiveHoldings(holdRes);
+      }
     } catch (err) {
       console.error(err);
     }
@@ -60,30 +94,63 @@ export const PaperOrders: React.FC<PaperOrdersProps> = ({
     loadData();
     const interval = setInterval(loadData, 4000);
     return () => clearInterval(interval);
-  }, [selectedSymbol]);
+  }, [selectedSymbol, mode]);
 
   const effectivePrice = orderType === 'MARKET' ? (currentQuote?.price || 0) : limitPrice;
   const estimatedCost = parseFloat((effectivePrice * quantity).toFixed(2));
+  // MIS gives 5x leverage in Indian equity markets (20% margin required)
+  const requiredMargin = product === 'MIS' ? estimatedCost * 0.2 : estimatedCost;
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage(null);
+
     try {
-      const res = await api.placeOrder({
-        symbol: selectedSymbol,
-        side,
-        orderType,
-        quantity,
-        price: orderType !== 'MARKET' ? limitPrice : undefined
-      });
-      setMessage({ text: `${res.message} (Paper INR)` });
+      if (isLive) {
+        // Route through Live Broker Gateway & Risk Engine
+        const res = await api.placeLiveBrokerOrder({
+          symbol: selectedSymbol,
+          side,
+          product,
+          orderType: orderType === 'STOP_LOSS' ? 'SL-M' : (orderType as any),
+          quantity,
+          price: orderType !== 'MARKET' ? limitPrice : undefined
+        });
+        setMessage({ text: res.message });
+      } else {
+        // Route through Paper Trading Engine
+        const res = await api.placeOrder({
+          symbol: selectedSymbol,
+          side,
+          orderType,
+          quantity,
+          price: orderType !== 'MARKET' ? limitPrice : undefined
+        });
+        setMessage({ text: `${res.message} (Paper Simulation)` });
+      }
+
       onOrderPlaced();
       await loadData();
     } catch (err: any) {
       setMessage({ text: err.response?.data?.error || err.message, error: true });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSquareOffLive = async (pos: BrokerPosition) => {
+    if (!confirm(`Confirm market square-off for ${pos.quantity} shares of ${pos.symbol} (${pos.product})?`)) return;
+    try {
+      await api.squareOffBrokerPosition({
+        symbol: pos.symbol,
+        product: pos.product as any,
+        quantity: pos.quantity
+      });
+      await loadData();
+      onOrderPlaced();
+    } catch (err: any) {
+      alert(err.response?.data?.error || err.message);
     }
   };
 
@@ -99,24 +166,46 @@ export const PaperOrders: React.FC<PaperOrdersProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Simulation Warning Banner */}
-      <div className="bg-dark-800/90 border border-slate-700/80 rounded-2xl p-4 flex items-center justify-between text-xs text-slate-300">
-        <div className="flex items-center gap-3">
-          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-          <span>
-            <strong className="text-amber-300">Simulated Fills Notice:</strong> Orders placed in this terminal are virtual paper trades denominated in Indian Rupee (₹ INR). No capital is risked.
-          </span>
+      {/* Dynamic Mode Header Banner */}
+      {isLive ? (
+        <div className="bg-red-950/60 border border-red-700/80 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-red-100 shadow-md">
+          <div className="flex items-center gap-3">
+            <Radio className="w-5 h-5 text-trade-red animate-pulse shrink-0" />
+            <div>
+              <strong className="text-white text-sm block">🔴 LIVE BROKER EXECUTION MODE ACTIVE</strong>
+              Orders submitted on this ticket are routed through Zerodha Kite Connect with real margin commitment. Pre-trade risk controls enforce max order limit ₹1,00,000.
+            </div>
+          </div>
+          <div className="font-mono bg-dark-900/80 px-3 py-1.5 rounded-xl border border-red-800 text-right shrink-0">
+            Available Broker Margin: <span className="font-bold text-emerald-400">{formatINR(brokerFunds?.availableMargin || 450000)}</span>
+          </div>
         </div>
-        <div className="font-mono text-slate-400">
-          Available Cash: <span className="font-bold text-emerald-400">{formatINR(portfolio?.cashBalance || 1000000)}</span>
+      ) : (
+        <div className="bg-dark-800/90 border border-slate-700/80 rounded-2xl p-4 flex items-center justify-between text-xs text-slate-300">
+          <div className="flex items-center gap-3">
+            <ShieldCheck className="w-4 h-4 text-trade-green shrink-0" />
+            <span>
+              <strong className="text-emerald-300">Paper Trading Simulator Active:</strong> Virtual orders in Indian Rupee (₹ INR). Zero real money at risk.
+            </span>
+          </div>
+          <div className="font-mono text-slate-400">
+            Available Cash: <span className="font-bold text-emerald-400">{formatINR(portfolio?.cashBalance || 1000000)}</span>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Order Execution Ticket */}
-        <div className="bg-dark-800 p-6 rounded-2xl border border-dark-700 space-y-5">
+        <div className={`p-6 rounded-2xl border space-y-5 ${isLive ? 'bg-dark-800 border-red-800/60' : 'bg-dark-800 border-dark-700'}`}>
           <div className="flex items-center justify-between border-b border-dark-700/80 pb-3">
-            <h2 className="font-bold text-white text-sm">Paper Order Ticket</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="font-bold text-white text-sm">
+                {isLive ? 'Live Broker Ticket' : 'Paper Order Ticket'}
+              </h2>
+              <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${isLive ? 'bg-red-950 text-trade-red border border-red-800' : 'bg-emerald-950 text-trade-green'}`}>
+                {isLive ? 'LIVE BROKER' : 'SIMULATION'}
+              </span>
+            </div>
             <span className="text-xs font-mono text-trade-cyan">{formatINR(currentQuote?.price || 0)}</span>
           </div>
 
@@ -167,6 +256,31 @@ export const PaperOrders: React.FC<PaperOrdersProps> = ({
               >
                 SELL / SHORT
               </button>
+            </div>
+
+            {/* Product Type (CNC vs MIS) */}
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">Product Type</label>
+              <div className="grid grid-cols-2 gap-2 bg-dark-900 p-1 rounded-xl border border-dark-700 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setProduct('MIS')}
+                  className={`py-1.5 rounded-lg transition ${
+                    product === 'MIS' ? 'bg-dark-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  MIS (Intraday 5x)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProduct('CNC')}
+                  className={`py-1.5 rounded-lg transition ${
+                    product === 'CNC' ? 'bg-dark-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  CNC (Delivery 1x)
+                </button>
+              </div>
             </div>
 
             {/* Order Type */}
@@ -230,19 +344,19 @@ export const PaperOrders: React.FC<PaperOrdersProps> = ({
               />
             </div>
 
-            {/* Cost Summary Box in INR */}
+            {/* Margin Calculation Preview in INR */}
             <div className="bg-dark-900 p-3.5 rounded-xl border border-dark-700/80 font-mono text-xs space-y-1.5">
               <div className="flex justify-between text-slate-400 font-sans">
-                <span>Unit Price:</span>
-                <span className="font-mono text-slate-200">{formatINR(effectivePrice)}</span>
+                <span>Order Value:</span>
+                <span className="font-mono text-slate-200">{formatINR(estimatedCost)}</span>
               </div>
               <div className="flex justify-between text-slate-400 font-sans">
-                <span>Estimated Order Value:</span>
-                <span className="font-mono font-bold text-white">{formatINR(estimatedCost)}</span>
+                <span>Required Margin ({product}):</span>
+                <span className="font-mono font-bold text-white">{formatINR(requiredMargin)}</span>
               </div>
               <div className="flex justify-between text-slate-400 font-sans text-[11px] pt-1 border-t border-dark-700">
-                <span>Brokerage / STT:</span>
-                <span className="text-trade-green font-mono">₹0.00 (Simulated Demo)</span>
+                <span>Pre-Trade Risk Engine:</span>
+                <span className="text-trade-green font-mono">Max ₹1,00,000 / Order</span>
               </div>
             </div>
 
@@ -250,18 +364,82 @@ export const PaperOrders: React.FC<PaperOrdersProps> = ({
               type="submit"
               disabled={loading}
               className={`w-full py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition shadow-lg ${
-                side === 'BUY'
-                  ? 'bg-trade-green hover:bg-trade-greenHover text-dark-900'
-                  : 'bg-trade-red hover:bg-trade-redHover text-white'
+                isLive
+                  ? side === 'BUY' ? 'bg-trade-green hover:bg-trade-greenHover text-dark-900' : 'bg-trade-red hover:bg-trade-redHover text-white'
+                  : side === 'BUY' ? 'bg-trade-green hover:bg-trade-greenHover text-dark-900' : 'bg-trade-red hover:bg-trade-redHover text-white'
               }`}
             >
-              {loading ? 'Simulating Execution...' : `Submit ${side} Order (₹)`}
+              {loading ? 'Routing Order...' : isLive ? `Execute Live ${side} on Exchange` : `Submit Paper ${side} Order`}
             </button>
           </form>
         </div>
 
-        {/* Middle & Right: Level 2 Order Book & Orders Table */}
+        {/* Middle & Right: Level 2 Order Book & Tables */}
         <div className="lg:col-span-2 space-y-6">
+          {/* If in LIVE mode: Show Live Broker Positions */}
+          {isLive && (
+            <div className="bg-dark-800 p-5 rounded-2xl border border-dark-700">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Briefcase className="w-4 h-4 text-trade-cyan" />
+                  Live Broker Net Positions (Zerodha Kite)
+                </h3>
+                <span className="text-xs font-mono text-slate-400">
+                  {livePositions.length} Open Position(s)
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs font-mono">
+                  <thead className="bg-dark-900/80 text-[10px] font-sans font-semibold uppercase text-slate-400 border-b border-dark-700">
+                    <tr>
+                      <th className="py-2.5 px-3">Symbol</th>
+                      <th className="py-2.5 px-3">Product</th>
+                      <th className="py-2.5 px-3 text-right">Quantity</th>
+                      <th className="py-2.5 px-3 text-right">Buy Price</th>
+                      <th className="py-2.5 px-3 text-right">LTP</th>
+                      <th className="py-2.5 px-3 text-right">P&L (INR)</th>
+                      <th className="py-2.5 px-3 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-dark-700/60">
+                    {livePositions.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-5 text-center text-slate-500 font-sans">
+                          No open intraday/live positions on broker.
+                        </td>
+                      </tr>
+                    ) : (
+                      livePositions.map((pos) => {
+                        const isPos = pos.pnl >= 0;
+                        return (
+                          <tr key={pos.symbol} className="hover:bg-dark-700/40">
+                            <td className="py-2.5 px-3 font-bold text-white">{pos.symbol}</td>
+                            <td className="py-2.5 px-3 text-slate-400">{pos.product}</td>
+                            <td className="py-2.5 px-3 text-right text-slate-200">{pos.quantity}</td>
+                            <td className="py-2.5 px-3 text-right text-slate-300">{formatINR(pos.buyPrice)}</td>
+                            <td className="py-2.5 px-3 text-right text-white font-bold">{formatINR(pos.currentPrice)}</td>
+                            <td className={`py-2.5 px-3 text-right font-bold ${isPos ? 'text-trade-green' : 'text-trade-red'}`}>
+                              {isPos ? '+' : ''}{formatINR(pos.pnl)} ({isPos ? '+' : ''}{pos.pnlPercent.toFixed(2)}%)
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              <button
+                                onClick={() => handleSquareOffLive(pos)}
+                                className="px-2.5 py-1 bg-red-950/80 text-trade-red border border-red-800 rounded-lg text-[10px] font-bold hover:bg-trade-red hover:text-white transition"
+                              >
+                                Square Off
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* Level 2 Order Book Depth Preview */}
           <div className="bg-dark-800 p-5 rounded-2xl border border-dark-700">
             <div className="flex items-center justify-between mb-3">
@@ -275,7 +453,6 @@ export const PaperOrders: React.FC<PaperOrdersProps> = ({
             </div>
 
             <div className="grid grid-cols-2 gap-4 text-xs font-mono">
-              {/* Bids */}
               <div>
                 <div className="text-[10px] uppercase font-sans font-semibold text-trade-green mb-1.5">
                   Bids (Buy Orders)
@@ -290,7 +467,6 @@ export const PaperOrders: React.FC<PaperOrdersProps> = ({
                 </div>
               </div>
 
-              {/* Asks */}
               <div>
                 <div className="text-[10px] uppercase font-sans font-semibold text-trade-red mb-1.5">
                   Asks (Sell Orders)
@@ -307,11 +483,11 @@ export const PaperOrders: React.FC<PaperOrdersProps> = ({
             </div>
           </div>
 
-          {/* Orders Log in INR */}
+          {/* Orders Log */}
           <div className="bg-dark-800 p-5 rounded-2xl border border-dark-700">
             <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
               <Clock className="w-4 h-4 text-slate-400" />
-              Paper Order History & Fill Status (INR)
+              Order Book Records & History
             </h3>
 
             <div className="overflow-x-auto">
@@ -331,7 +507,7 @@ export const PaperOrders: React.FC<PaperOrdersProps> = ({
                   {orders.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-6 text-center text-slate-500 font-sans">
-                        No orders recorded yet. Submit your first simulated order above!
+                        No orders recorded yet. Submit your first order above!
                       </td>
                     </tr>
                   ) : (
@@ -350,7 +526,7 @@ export const PaperOrders: React.FC<PaperOrdersProps> = ({
                         </td>
                         <td className="py-2.5 px-3 text-center">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            o.status === 'FILLED' ? 'bg-emerald-500/10 text-trade-green border border-emerald-500/30' :
+                            o.status === 'FILLED' || o.status === 'COMPLETE' ? 'bg-emerald-500/10 text-trade-green border border-emerald-500/30' :
                             o.status === 'PENDING' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30' : 'bg-dark-900 text-slate-400'
                           }`}>
                             {o.status}

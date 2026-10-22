@@ -160,6 +160,50 @@ export interface JournalStats {
   topSetup: string;
 }
 
+// Live Broker Types
+export interface BrokerStatus {
+  mode: 'PAPER' | 'LIVE';
+  connected: boolean;
+  brokerName: string;
+  isKillSwitchLocked: boolean;
+}
+
+export interface BrokerFunds {
+  availableMargin: number;
+  usedMargin: number;
+  totalBalance: number;
+  collateral: number;
+  currency: string;
+}
+
+export interface BrokerPosition {
+  symbol: string;
+  product: 'CNC' | 'MIS' | 'NRML';
+  quantity: number;
+  buyPrice: number;
+  currentPrice: number;
+  pnl: number;
+  pnlPercent: number;
+}
+
+export interface BrokerHolding {
+  symbol: string;
+  isin: string;
+  quantity: number;
+  t1Quantity: number;
+  averagePrice: number;
+  lastPrice: number;
+  pnl: number;
+  pnlPercent: number;
+}
+
+export interface RiskSettings {
+  maxOrderValue: number;
+  maxDailyLoss: number;
+  maxQuantityPerOrder: number;
+  isKillSwitchLocked: boolean;
+}
+
 // Indian Currency (INR) Number Formatter
 export function formatINR(val: number | undefined | null): string {
   if (val === undefined || val === null || isNaN(val)) return '₹0.00';
@@ -272,6 +316,66 @@ export const api = {
   },
   deleteJournalEntry: async (id: string) => {
     const res = await axios.delete(`${API_BASE}/journal/${id}`);
+    return res.data;
+  },
+
+  // Live Broker Gateway
+  getBrokerStatus: async (): Promise<BrokerStatus> => {
+    const res = await axios.get(`${API_BASE}/broker/status`);
+    return res.data;
+  },
+  setBrokerMode: async (mode: 'PAPER' | 'LIVE'): Promise<{ mode: 'PAPER' | 'LIVE'; message: string }> => {
+    const res = await axios.post(`${API_BASE}/broker/mode`, { mode });
+    return res.data;
+  },
+  connectBroker: async (data: {
+    broker: string;
+    apiKey: string;
+    apiSecret?: string;
+    accessToken?: string;
+    clientId?: string;
+  }) => {
+    const res = await axios.post(`${API_BASE}/broker/connect`, data);
+    return res.data;
+  },
+  getBrokerFunds: async (): Promise<BrokerFunds> => {
+    const res = await axios.get(`${API_BASE}/broker/funds`);
+    return res.data;
+  },
+  getBrokerPositions: async (): Promise<BrokerPosition[]> => {
+    const res = await axios.get(`${API_BASE}/broker/positions`);
+    return res.data;
+  },
+  getBrokerHoldings: async (): Promise<BrokerHolding[]> => {
+    const res = await axios.get(`${API_BASE}/broker/holdings`);
+    return res.data;
+  },
+  placeLiveBrokerOrder: async (data: {
+    symbol: string;
+    side: 'BUY' | 'SELL';
+    product: 'CNC' | 'MIS';
+    orderType: 'MARKET' | 'LIMIT' | 'SL' | 'SL-M';
+    quantity: number;
+    price?: number;
+    triggerPrice?: number;
+  }) => {
+    const res = await axios.post(`${API_BASE}/broker/orders`, data);
+    return res.data;
+  },
+  squareOffBrokerPosition: async (data: { symbol: string; product: 'CNC' | 'MIS'; quantity: number }) => {
+    const res = await axios.post(`${API_BASE}/broker/square-off`, data);
+    return res.data;
+  },
+  triggerKillSwitch: async (): Promise<{ cancelledOrders: number; squaredOffPositions: number; message: string }> => {
+    const res = await axios.post(`${API_BASE}/broker/kill-switch`);
+    return res.data;
+  },
+  getRiskSettings: async (): Promise<RiskSettings> => {
+    const res = await axios.get(`${API_BASE}/broker/risk-settings`);
+    return res.data;
+  },
+  unlockKillSwitch: async () => {
+    const res = await axios.post(`${API_BASE}/broker/unlock-kill-switch`);
     return res.data;
   }
 };
