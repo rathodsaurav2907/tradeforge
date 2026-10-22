@@ -8,10 +8,11 @@ import {
   BarChart3, 
   Activity, 
   Sliders, 
-  RefreshCw 
+  RefreshCw,
+  AlertTriangle 
 } from 'lucide-react';
 import { createChart, ColorType, IChartApi, ISeriesApi } from 'lightweight-charts';
-import { Bar, AISignals, Quote, api } from '../services/api';
+import { Bar, AISignals, Quote, formatINR, api } from '../services/api';
 
 interface ChartsProps {
   selectedSymbol: string;
@@ -60,7 +61,6 @@ export const Charts: React.FC<ChartsProps> = ({
   useEffect(() => {
     if (!chartContainerRef.current || bars.length === 0) return;
 
-    // Clean up any existing chart
     if (chartInstanceRef.current) {
       chartInstanceRef.current.remove();
       chartInstanceRef.current = null;
@@ -108,13 +108,12 @@ export const Charts: React.FC<ChartsProps> = ({
     const volumeSeries = chart.addHistogramSeries({
       color: '#26a69a',
       priceFormat: { type: 'volume' },
-      priceScaleId: '', // Overlay over chart
+      priceScaleId: '',
     });
     volumeSeries.priceScale().applyOptions({
       scaleMargins: { top: 0.8, bottom: 0 }
     });
 
-    // Format bars for Lightweight Charts (requires sorted timestamps in YYYY-MM-DD format)
     const formattedCandles = bars.map((b) => ({
       time: b.timestamp.split('T')[0],
       open: b.open,
@@ -184,7 +183,6 @@ export const Charts: React.FC<ChartsProps> = ({
 
     chart.timeScale().fitContent();
 
-    // Responsive Resize Handler
     const handleResize = () => {
       if (chartContainerRef.current && chartInstanceRef.current) {
         chartInstanceRef.current.applyOptions({
@@ -208,6 +206,17 @@ export const Charts: React.FC<ChartsProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Delayed Data Notice */}
+      <div className="bg-dark-800/80 border border-slate-700/60 rounded-xl px-4 py-2 flex items-center justify-between text-xs text-slate-400">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-trade-green" />
+          <span>Market Data: Permitted educational stream · 15-minute delayed quotes · Prices in Indian Rupee (INR ₹)</span>
+        </div>
+        <span className="text-[10px] bg-dark-900 border border-dark-700 px-2 py-0.5 rounded text-trade-cyan font-mono">
+          TradingView Lightweight Charts v4
+        </span>
+      </div>
+
       {/* Symbol Selector Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-dark-800 p-4 rounded-2xl border border-dark-700">
         <div className="flex items-center gap-3">
@@ -215,7 +224,7 @@ export const Charts: React.FC<ChartsProps> = ({
             {selectedSymbol}
             {currentQuote && (
               <span className={`text-sm px-2 py-0.5 rounded ${currentQuote.change >= 0 ? 'bg-emerald-950/80 text-trade-green border border-emerald-800' : 'bg-red-950/80 text-trade-red border border-red-800'}`}>
-                ${currentQuote.price.toFixed(2)} ({currentQuote.changePercent >= 0 ? '+' : ''}{currentQuote.changePercent.toFixed(2)}%)
+                {formatINR(currentQuote.price)} ({currentQuote.changePercent >= 0 ? '+' : ''}{currentQuote.changePercent.toFixed(2)}%)
               </span>
             )}
           </div>
@@ -223,7 +232,7 @@ export const Charts: React.FC<ChartsProps> = ({
 
         {/* Quick Ticker Switcher */}
         <div className="flex flex-wrap items-center gap-1.5 font-mono">
-          {['NVDA', 'AAPL', 'TSLA', 'MSFT', 'BTC-USD', 'SPY'].map((sym) => (
+          {['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'TATAMOTORS', 'SBIN', 'NIFTY50'].map((sym) => (
             <button
               key={sym}
               onClick={() => onSelectSymbol(sym)}
@@ -274,7 +283,7 @@ export const Charts: React.FC<ChartsProps> = ({
             </div>
             <div className="text-[11px] font-mono text-slate-400 flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-trade-green inline-block" />
-              TradingView Lightweight Charts
+              Interactive Daily Candles (₹ INR)
             </div>
           </div>
 
@@ -297,7 +306,7 @@ export const Charts: React.FC<ChartsProps> = ({
                   {bars[bars.length - 1].rsi_14!.toFixed(1)}
                 </span>
                 <span className="text-[11px] text-slate-500 font-sans">
-                  {bars[bars.length - 1].rsi_14! < 30 ? '(Oversold / Bullish)' : bars[bars.length - 1].rsi_14! > 70 ? '(Overbought / Bearish)' : '(Neutral)'}
+                  {bars[bars.length - 1].rsi_14! < 30 ? '(Oversold / Bullish Bounce)' : bars[bars.length - 1].rsi_14! > 70 ? '(Overbought / Bearish)' : '(Neutral Consolidation)'}
                 </span>
               </div>
               <div className="text-[11px] text-slate-500">
@@ -307,7 +316,7 @@ export const Charts: React.FC<ChartsProps> = ({
           )}
         </div>
 
-        {/* Right: AI Trading Decision & Strategy Scorecard */}
+        {/* Right: AI Trading Decision & Strategy Scorecard in INR */}
         <div className="bg-dark-800 p-6 rounded-2xl border border-dark-700 flex flex-col justify-between space-y-5">
           <div>
             <div className="flex items-center justify-between border-b border-dark-700/80 pb-3 mb-4">
@@ -316,7 +325,7 @@ export const Charts: React.FC<ChartsProps> = ({
                 <h3 className="font-bold text-white text-sm">AI Trade Synthesis</h3>
               </div>
               <span className="text-[10px] font-mono uppercase bg-emerald-950/90 text-trade-green border border-emerald-800 px-2 py-0.5 rounded">
-                Python Engine
+                Pandas & NumPy
               </span>
             </div>
 
@@ -353,15 +362,15 @@ export const Charts: React.FC<ChartsProps> = ({
                   </div>
                 </div>
 
-                {/* Stop Loss & Take Profit Target */}
+                {/* Stop Loss & Take Profit Target in INR */}
                 <div className="bg-dark-900/80 p-3.5 rounded-xl border border-dark-700/60 space-y-2 text-xs">
                   <div className="flex justify-between items-center">
                     <span className="text-slate-400 font-sans">Suggested Stop-Loss (1.5x ATR):</span>
-                    <span className="font-bold text-trade-red">${signals.stop_loss_suggested.toFixed(2)}</span>
+                    <span className="font-bold text-trade-red">{formatINR(signals.stop_loss_suggested)}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-slate-400 font-sans">Suggested Take-Profit (3.0x ATR):</span>
-                    <span className="font-bold text-trade-green">${signals.take_profit_suggested.toFixed(2)}</span>
+                    <span className="font-bold text-trade-green">{formatINR(signals.take_profit_suggested)}</span>
                   </div>
                   <div className="flex justify-between items-center pt-1 border-t border-dark-700/60 text-[11px]">
                     <span className="text-slate-400 font-sans">Risk / Reward Ratio:</span>

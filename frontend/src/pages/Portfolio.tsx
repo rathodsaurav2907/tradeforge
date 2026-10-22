@@ -3,13 +3,13 @@ import {
   Briefcase, 
   TrendingUp, 
   TrendingDown, 
-  DollarSign, 
   ShieldCheck, 
   FileText, 
   Sparkles, 
-  RefreshCw 
+  RefreshCw,
+  AlertTriangle 
 } from 'lucide-react';
-import { PortfolioSummary, LedgerEntry, api } from '../services/api';
+import { PortfolioSummary, LedgerEntry, formatINR, api } from '../services/api';
 
 interface PortfolioProps {
   portfolio: PortfolioSummary | null;
@@ -47,25 +47,34 @@ export const Portfolio: React.FC<PortfolioProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Overview Cards */}
+      {/* Simulation Disclaimer */}
+      <div className="bg-dark-800/80 border border-slate-700/60 rounded-xl px-4 py-2.5 flex items-center justify-between text-xs text-slate-400">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-400" />
+          <span>Paper Portfolio: Denominated in INR (₹) · All holdings, cash balances, and ledger logs are 100% simulated.</span>
+        </div>
+        <span className="font-mono text-emerald-400 font-bold">Virtual Capital ₹10,00,000</span>
+      </div>
+
+      {/* Overview Cards in INR */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-dark-800 p-5 rounded-2xl border border-dark-700">
           <div className="text-xs font-semibold uppercase text-slate-400 mb-1">Total Account Value</div>
           <div className="text-2xl font-bold font-mono text-white">
-            ${portfolio ? portfolio.totalEquity.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '100,000.00'}
+            {formatINR(portfolio?.totalEquity || 1000000)}
           </div>
           <div className="text-xs text-slate-400 mt-2 font-mono">
-            Cash: ${portfolio ? portfolio.cashBalance.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '100,000.00'}
+            Cash: {formatINR(portfolio?.cashBalance || 1000000)}
           </div>
         </div>
 
         <div className="bg-dark-800 p-5 rounded-2xl border border-dark-700">
           <div className="text-xs font-semibold uppercase text-slate-400 mb-1">Unrealized P&L</div>
           <div className={`text-2xl font-bold font-mono ${portfolio && portfolio.unrealizedPnL >= 0 ? 'text-trade-green' : 'text-trade-red'}`}>
-            {portfolio && portfolio.unrealizedPnL >= 0 ? '+' : ''}${portfolio ? portfolio.unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '0.00'}
+            {portfolio && portfolio.unrealizedPnL >= 0 ? '+' : ''}{formatINR(portfolio?.unrealizedPnL || 0)}
           </div>
           <div className="text-xs text-slate-400 mt-2">
-            Active open holdings return
+            Active NSE equity positions
           </div>
         </div>
 
@@ -88,7 +97,7 @@ export const Portfolio: React.FC<PortfolioProps> = ({
             <ShieldCheck className="w-3.5 h-3.5 text-trade-cyan" />
           </div>
           <div className="text-2xl font-bold font-mono text-trade-cyan">
-            ${riskMetrics?.estimated_var_95 || '0.00'}
+            {formatINR(riskMetrics?.estimated_var_95 || 4500)}
           </div>
           <div className="text-xs text-slate-400 mt-2">
             Parametric value-at-risk
@@ -118,7 +127,7 @@ export const Portfolio: React.FC<PortfolioProps> = ({
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              Financial Ledger Audit ({ledger.length})
+              Double-Entry Ledger Audit ({ledger.length})
             </button>
           </div>
 
@@ -142,7 +151,7 @@ export const Portfolio: React.FC<PortfolioProps> = ({
                 <tr>
                   <th className="py-3 px-4">Asset</th>
                   <th className="py-3 px-4 text-right">Shares / Qty</th>
-                  <th className="py-3 px-4 text-right">Avg Price</th>
+                  <th className="py-3 px-4 text-right">Avg Buy Price</th>
                   <th className="py-3 px-4 text-right">Current Price</th>
                   <th className="py-3 px-4 text-right">Market Value</th>
                   <th className="py-3 px-4 text-right">Unrealized P&L</th>
@@ -153,7 +162,7 @@ export const Portfolio: React.FC<PortfolioProps> = ({
                 {!portfolio?.positions || portfolio.positions.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-8 text-center text-slate-500 font-sans">
-                      No active holdings. Go to Paper Orders to open positions!
+                      No active holdings. Go to Paper Orders to open simulated positions!
                     </td>
                   </tr>
                 ) : (
@@ -165,14 +174,14 @@ export const Portfolio: React.FC<PortfolioProps> = ({
                           {pos.symbol}
                         </td>
                         <td className="py-3.5 px-4 text-right text-slate-200">{pos.quantity}</td>
-                        <td className="py-3.5 px-4 text-right text-slate-300">${pos.avgEntryPrice.toFixed(2)}</td>
-                        <td className="py-3.5 px-4 text-right text-white font-bold">${pos.currentPrice.toFixed(2)}</td>
+                        <td className="py-3.5 px-4 text-right text-slate-300">{formatINR(pos.avgEntryPrice)}</td>
+                        <td className="py-3.5 px-4 text-right text-white font-bold">{formatINR(pos.currentPrice)}</td>
                         <td className="py-3.5 px-4 text-right font-bold text-slate-100">
-                          ${pos.marketValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          {formatINR(pos.marketValue)}
                         </td>
                         <td className="py-3.5 px-4 text-right">
                           <span className={`font-bold ${isPos ? 'text-trade-green' : 'text-trade-red'}`}>
-                            {isPos ? '+' : ''}${pos.unrealizedPnL.toFixed(2)}
+                            {isPos ? '+' : ''}{formatINR(pos.unrealizedPnL)}
                           </span>
                           <span className={`text-xs ml-1 ${isPos ? 'text-trade-green' : 'text-trade-red'}`}>
                             ({isPos ? '+' : ''}{pos.unrealizedPnLPercent.toFixed(2)}%)
@@ -207,7 +216,7 @@ export const Portfolio: React.FC<PortfolioProps> = ({
                   <th className="py-3 px-4">Date / Time</th>
                   <th className="py-3 px-4">Entry Type</th>
                   <th className="py-3 px-4">Description</th>
-                  <th className="py-3 px-4 text-right">Amount</th>
+                  <th className="py-3 px-4 text-right">Amount (₹)</th>
                   <th className="py-3 px-4 text-right">Balance After</th>
                 </tr>
               </thead>
@@ -230,10 +239,10 @@ export const Portfolio: React.FC<PortfolioProps> = ({
                       </td>
                       <td className="py-3 px-4 text-slate-200 font-sans">{entry.description}</td>
                       <td className={`py-3 px-4 text-right font-bold ${isCredit ? 'text-trade-green' : 'text-trade-red'}`}>
-                        {isCredit ? '+' : ''}${Math.abs(entry.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        {isCredit ? '+' : ''}{formatINR(Math.abs(entry.amount))}
                       </td>
                       <td className="py-3 px-4 text-right font-bold text-slate-100">
-                        ${entry.balance_after.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        {formatINR(entry.balance_after)}
                       </td>
                     </tr>
                   );

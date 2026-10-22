@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { inMemoryStore, DEMO_PORTFOLIO_ID, isUsingPostgres, getDbPool } from '../db/database';
+import { inMemoryStore, DEMO_PORTFOLIO_ID } from '../db/database';
 import { marketDataService } from './marketData.service';
 
 export interface OrderInput {
@@ -20,10 +20,14 @@ export interface PositionSummary {
   marketValue: number;
   unrealizedPnL: number;
   unrealizedPnLPercent: number;
+  currency: string;
+  currencySymbol: string;
 }
 
 export interface PortfolioSummary {
   portfolioId: string;
+  currency: string;
+  currencySymbol: string;
   cashBalance: number;
   holdingsMarketValue: number;
   totalEquity: number;
@@ -32,11 +36,13 @@ export interface PortfolioSummary {
   dayPnL: number;
   dayPnLPercent: number;
   positions: PositionSummary[];
+  isSimulated: boolean;
+  disclaimer: string;
 }
 
 export class PaperTradingEngine {
   /**
-   * Place and process a paper trading order.
+   * Place and process a paper trading order in INR.
    */
   public async placeOrder(input: OrderInput): Promise<any> {
     const portfolioId = input.portfolioId || DEMO_PORTFOLIO_ID;
@@ -51,7 +57,6 @@ export class PaperTradingEngine {
     const executionPrice = input.orderType === 'MARKET' ? quote.price : (input.price || quote.price);
     const totalCost = parseFloat((executionPrice * input.quantity).toFixed(2));
 
-    // Get current portfolio
     const portfolio = inMemoryStore.portfolios.get(portfolioId);
     if (!portfolio) {
       throw new Error('Portfolio not found.');
@@ -66,10 +71,10 @@ export class PaperTradingEngine {
       avg_entry_price: 0
     };
 
-    // Rule validation
+    // Validation rules
     if (input.side === 'BUY') {
       if (portfolio.cash_balance < totalCost) {
-        throw new Error(`Insufficient virtual cash balance. Required: $${totalCost.toLocaleString()}, Available: $${portfolio.cash_balance.toLocaleString()}`);
+        throw new Error(`Insufficient virtual cash balance. Required: ₹${totalCost.toLocaleString('en-IN')}, Available: ₹${portfolio.cash_balance.toLocaleString('en-IN')}`);
       }
     } else if (input.side === 'SELL') {
       if (existingPos.quantity < input.quantity) {
@@ -81,7 +86,6 @@ export class PaperTradingEngine {
     const tradeId = uuidv4();
     const now = new Date();
 
-    // Determine fill status: Market orders fill immediately; Limit orders fill if marketable
     let isFilled = false;
     if (input.orderType === 'MARKET') {
       isFilled = true;
@@ -96,7 +100,7 @@ export class PaperTradingEngine {
     const orderRecord = {
       id: orderId,
       user_id: input.userId,
-      portfolio_id: portfolioId,
+      portfolioId: portfolioId,
       symbol,
       side: input.side,
       order_type: input.orderType,
@@ -106,6 +110,9 @@ export class PaperTradingEngine {
       price: input.price || quote.price,
       avg_fill_price: isFilled ? executionPrice : null,
       total_cost: isFilled ? totalCost : null,
+      currency: 'INR',
+      currency_symbol: '₹',
+      is_simulated: true,
       created_at: now,
       updated_at: now
     };
@@ -113,7 +120,6 @@ export class PaperTradingEngine {
     inMemoryStore.orders.set(orderId, orderRecord);
 
     if (isFilled) {
-      // Record Trade Execution
       inMemoryStore.trades.push({
         id: tradeId,
         order_id: orderId,
@@ -122,15 +128,14 @@ export class PaperTradingEngine {
         side: input.side,
         quantity: input.quantity,
         price: executionPrice,
+        currency: 'INR',
         fee: 0.0,
         executed_at: now
       });
 
-      // Update Portfolio Cash & Positions
       if (input.side === 'BUY') {
         portfolio.cash_balance = parseFloat((portfolio.cash_balance - totalCost).toFixed(2));
         
-        // Recalculate weighted average entry price
         const totalShares = existingPos.quantity + input.quantity;
         const totalSpent = (existingPos.quantity * existingPos.avg_entry_price) + totalCost;
         existingPos.quantity = totalShares;
@@ -138,19 +143,17 @@ export class PaperTradingEngine {
         existingPos.updated_at = now;
         inMemoryStore.positions.set(posKey, existingPos);
 
-        // Record Ledger Entry
         inMemoryStore.ledger.push({
           id: uuidv4(),
           portfolio_id: portfolioId,
           entry_type: 'BUY_ORDER',
           amount: -totalCost,
           balance_after: portfolio.cash_balance,
-          description: `Filled BUY ${input.quantity} ${symbol} @ $${executionPrice}`,
+          description: `Simulated BUY ${input.quantity} ${symbol} @ ₹${executionPrice.toFixed(2)}`,
           reference_id: orderId,
           created_at: now
         });
       } else {
-        // SELL
         portfolio.cash_balance = parseFloat((portfolio.cash_balance + totalCost).toFixed(2));
         existingPos.quantity = parseFloat((existingPos.quantity - input.quantity).toFixed(4));
         existingPos.updated_at = now;
@@ -161,14 +164,13 @@ export class PaperTradingEngine {
           inMemoryStore.positions.set(posKey, existingPos);
         }
 
-        // Record Ledger Entry
         inMemoryStore.ledger.push({
           id: uuidv4(),
           portfolio_id: portfolioId,
           entry_type: 'SELL_ORDER',
           amount: totalCost,
           balance_after: portfolio.cash_balance,
-          description: `Filled SELL ${input.quantity} ${symbol} @ $${executionPrice}`,
+          description: `Simulated SELL ${input.quantity} ${symbol} @ ₹${executionPrice.toFixed(2)}`,
           reference_id: orderId,
           created_at: now
         });
@@ -178,9 +180,6 @@ export class PaperTradingEngine {
     return orderRecord;
   }
 
-  /**
-   * Cancel an open pending order.
-   */
   public async cancelOrder(orderId: string): Promise<any> {
     const order = inMemoryStore.orders.get(orderId);
     if (!order) {
@@ -195,21 +194,15 @@ export class PaperTradingEngine {
     return order;
   }
 
-  /**
-   * Get all active and completed orders.
-   */
   public async getOrders(portfolioId: string = DEMO_PORTFOLIO_ID): Promise<any[]> {
     return Array.from(inMemoryStore.orders.values())
-      .filter(o => o.portfolio_id === portfolioId)
+      .filter(o => o.portfolioId === portfolioId || o.portfolio_id === portfolioId)
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
 
-  /**
-   * Calculate complete portfolio performance, unrealized P&L and holdings.
-   */
   public async getPortfolioSummary(portfolioId: string = DEMO_PORTFOLIO_ID): Promise<PortfolioSummary> {
     const portfolio = inMemoryStore.portfolios.get(portfolioId) || {
-      cash_balance: 100000.00
+      cash_balance: 1000000.00
     };
 
     const positionList: PositionSummary[] = [];
@@ -234,7 +227,9 @@ export class PaperTradingEngine {
           currentPrice: quote.price,
           marketValue: marketVal,
           unrealizedPnL,
-          unrealizedPnLPercent
+          unrealizedPnLPercent,
+          currency: 'INR',
+          currencySymbol: '₹'
         });
       }
     }
@@ -242,27 +237,26 @@ export class PaperTradingEngine {
     const cash = parseFloat(portfolio.cash_balance.toFixed(2));
     const totalEquity = parseFloat((cash + holdingsMarketValue).toFixed(2));
     const unrealizedPnL = parseFloat((holdingsMarketValue - totalCostBasis).toFixed(2));
-    
-    // Day P&L estimate based on current holdings
-    const dayPnL = parseFloat((unrealizedPnL * 0.45).toFixed(2));
+    const dayPnL = parseFloat((unrealizedPnL * 0.42).toFixed(2));
     const dayPnLPercent = totalEquity > 0 ? parseFloat(((dayPnL / totalEquity) * 100).toFixed(2)) : 0;
 
     return {
       portfolioId,
+      currency: 'INR',
+      currencySymbol: '₹',
       cashBalance: cash,
       holdingsMarketValue: parseFloat(holdingsMarketValue.toFixed(2)),
       totalEquity,
       unrealizedPnL,
-      realizedPnL: 1420.50, // mock initial realized gains
+      realizedPnL: 8450.00, // mock realized gains in INR
       dayPnL,
       dayPnLPercent,
-      positions: positionList
+      positions: positionList,
+      isSimulated: true,
+      disclaimer: 'DISCLAIMER: All balances, positions, and orders are 100% simulated with zero real monetary value. Data feeds are delayed 15 minutes or generated for educational purposes.'
     };
   }
 
-  /**
-   * Get Double-Entry Ledger History
-   */
   public async getLedger(portfolioId: string = DEMO_PORTFOLIO_ID): Promise<any[]> {
     return inMemoryStore.ledger
       .filter(entry => entry.portfolio_id === portfolioId)

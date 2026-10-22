@@ -9,6 +9,9 @@ export const config = {
   refreshTokenExpiry: '7d',
   databaseUrl: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradeforge',
   analyticsUrl: process.env.ANALYTICS_URL || 'http://localhost:8000',
-  defaultVirtualCash: 100000.0, // $100k starting virtual cash
-  corsOrigin: process.env.CORS_ORIGIN || '*'
+  currency: 'INR',
+  currencySymbol: '₹',
+  defaultVirtualCash: 1000000.0, // ₹10,00,000 (10 Lakh INR starting virtual paper capital)
+  corsOrigin: process.env.CORS_ORIGIN || '*',
+  dataSourceAttribution: 'Permitted Exchange Educational & Delayed 15m Simulation Feed'
 };

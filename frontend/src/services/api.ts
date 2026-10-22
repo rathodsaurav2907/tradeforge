@@ -12,7 +12,11 @@ export interface Quote {
   high: number;
   low: number;
   volume: number;
+  currency: string;
+  currencySymbol: string;
   timestamp: string;
+  dataSource: string;
+  isDelayed: boolean;
 }
 
 export interface Bar {
@@ -22,7 +26,6 @@ export interface Bar {
   low: number;
   close: number;
   volume: number;
-  // Enriched indicators from python analytics
   sma_20?: number;
   sma_50?: number;
   ema_9?: number;
@@ -47,6 +50,7 @@ export interface OrderBook {
   bids: OrderBookLevel[];
   asks: OrderBookLevel[];
   spread: number;
+  currency: string;
   timestamp: string;
 }
 
@@ -58,10 +62,14 @@ export interface Position {
   marketValue: number;
   unrealizedPnL: number;
   unrealizedPnLPercent: number;
+  currency: string;
+  currencySymbol: string;
 }
 
 export interface PortfolioSummary {
   portfolioId: string;
+  currency: string;
+  currencySymbol: string;
   cashBalance: number;
   holdingsMarketValue: number;
   totalEquity: number;
@@ -70,6 +78,8 @@ export interface PortfolioSummary {
   dayPnL: number;
   dayPnLPercent: number;
   positions: Position[];
+  isSimulated: boolean;
+  disclaimer: string;
 }
 
 export interface OrderRecord {
@@ -83,6 +93,9 @@ export interface OrderRecord {
   price: number;
   avg_fill_price: number | null;
   total_cost: number | null;
+  currency: string;
+  currency_symbol: string;
+  is_simulated: boolean;
   created_at: string;
 }
 
@@ -110,6 +123,53 @@ export interface LedgerEntry {
   description: string;
   reference_id: string | null;
   created_at: string;
+}
+
+export interface WatchlistRecord {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  symbols: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JournalEntry {
+  id: string;
+  userId: string;
+  orderId?: string;
+  symbol: string;
+  tradeType: 'BUY' | 'SELL';
+  entryPrice: number;
+  exitPrice?: number;
+  quantity: number;
+  setupTag: string;
+  notes: string;
+  emotionalState: 'DISCIPLINED' | 'PATIENT' | 'ANXIOUS' | 'FOMO';
+  rating: number;
+  pnl?: number;
+  createdAt: string;
+}
+
+export interface JournalStats {
+  totalLogged: number;
+  winRate: number;
+  averageRating: number;
+  disciplineScore: number;
+  topSetup: string;
+}
+
+// Indian Currency (INR) Number Formatter
+export function formatINR(val: number | undefined | null): string {
+  if (val === undefined || val === null || isNaN(val)) return '₹0.00';
+  const isNeg = val < 0;
+  const absVal = Math.abs(val);
+  const formatted = absVal.toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  return `${isNeg ? '-' : ''}₹${formatted}`;
 }
 
 export const api = {
@@ -172,6 +232,46 @@ export const api = {
   },
   getPortfolioRisk: async () => {
     const res = await axios.get(`${API_BASE}/analytics/portfolio-risk`);
+    return res.data;
+  },
+
+  // Custom User Watchlists
+  getWatchlists: async (): Promise<WatchlistRecord[]> => {
+    const res = await axios.get(`${API_BASE}/watchlists`);
+    return res.data;
+  },
+  createWatchlist: async (data: { name: string; description?: string; symbols?: string[] }): Promise<WatchlistRecord> => {
+    const res = await axios.post(`${API_BASE}/watchlists`, data);
+    return res.data;
+  },
+  addSymbolToWatchlist: async (watchlistId: string, symbol: string): Promise<WatchlistRecord> => {
+    const res = await axios.post(`${API_BASE}/watchlists/${watchlistId}/symbols`, { symbol });
+    return res.data;
+  },
+  removeSymbolFromWatchlist: async (watchlistId: string, symbol: string): Promise<WatchlistRecord> => {
+    const res = await axios.delete(`${API_BASE}/watchlists/${watchlistId}/symbols/${symbol}`);
+    return res.data;
+  },
+  deleteWatchlist: async (watchlistId: string) => {
+    const res = await axios.delete(`${API_BASE}/watchlists/${watchlistId}`);
+    return res.data;
+  },
+
+  // Trading Journal
+  getJournalEntries: async (): Promise<JournalEntry[]> => {
+    const res = await axios.get(`${API_BASE}/journal`);
+    return res.data;
+  },
+  createJournalEntry: async (data: Partial<JournalEntry>): Promise<JournalEntry> => {
+    const res = await axios.post(`${API_BASE}/journal`, data);
+    return res.data;
+  },
+  getJournalStats: async (): Promise<JournalStats> => {
+    const res = await axios.get(`${API_BASE}/journal/stats`);
+    return res.data;
+  },
+  deleteJournalEntry: async (id: string) => {
+    const res = await axios.delete(`${API_BASE}/journal/${id}`);
     return res.data;
   }
 };

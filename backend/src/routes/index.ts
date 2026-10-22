@@ -4,6 +4,8 @@ import marketRoutes from './market.routes';
 import ordersRoutes from './orders.routes';
 import portfolioRoutes from './portfolio.routes';
 import analyticsRoutes from './analytics.routes';
+import watchlistRoutes from './watchlist.routes';
+import journalRoutes from './journal.routes';
 
 const router = Router();
 
@@ -12,5 +14,7 @@ router.use('/market', marketRoutes);
 router.use('/orders', ordersRoutes);
 router.use('/portfolio', portfolioRoutes);
 router.use('/analytics', analyticsRoutes);
+router.use('/watchlists', watchlistRoutes);
+router.use('/journal', journalRoutes);
 
 export default router;
