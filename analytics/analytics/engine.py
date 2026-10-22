@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from typing import List, Dict, Any, Optional
 
+
 class AnalyticsEngine:
     """
     Quantitative trading and technical analysis engine leveraging pandas and numpy.
@@ -15,18 +16,17 @@ class AnalyticsEngine:
         """
         if not bars:
             return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        
+
         df = pd.DataFrame(bars)
-        # Ensure numerical types
         numeric_cols = ['open', 'high', 'low', 'close', 'volume']
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-        
+
         if 'timestamp' in df.columns:
             df['timestamp'] = pd.to_datetime(df['timestamp'])
             df = df.sort_values('timestamp').reset_index(drop=True)
-            
+
         return df
 
     @classmethod
@@ -38,6 +38,7 @@ class AnalyticsEngine:
         - RSI (14)
         - MACD (12, 26, 9)
         - Bollinger Bands (20, 2)
+        - Stochastic Oscillator (14,3)
         - ATR (14)
         """
         if len(df) < 5:
@@ -55,14 +56,13 @@ class AnalyticsEngine:
         df['ema_9'] = close.ewm(span=9, adjust=False).mean()
         df['ema_21'] = close.ewm(span=21, adjust=False).mean()
 
-        # Relative Strength Index (RSI 14)
+        # RSI (14)
         delta = close.diff()
         gain = np.where(delta > 0, delta, 0.0)
         loss = np.where(delta < 0, -delta, 0.0)
         roll_up = pd.Series(gain, index=df.index).rolling(window=14, min_periods=1).mean()
         roll_down = pd.Series(loss, index=df.index).rolling(window=14, min_periods=1).mean()
-        
-        # Avoid division by zero with numpy
+
         rs = np.where(roll_down == 0, 100.0, roll_up / (roll_down + 1e-9))
         df['rsi_14'] = 100.0 - (100.0 / (1.0 + rs))
 
@@ -80,6 +80,14 @@ class AnalyticsEngine:
         df['bb_mid'] = bb_mid
         df['bb_upper'] = bb_mid + (2.0 * bb_std)
         df['bb_lower'] = bb_mid - (2.0 * bb_std)
+
+        # Stochastic Oscillator (14, 3)
+        stoch_period = min(14, len(df))
+        lowest_low = df['low'].rolling(window=stoch_period, min_periods=1).min()
+        highest_high = df['high'].rolling(window=stoch_period, min_periods=1).max()
+        raw_k = 100.0 * (close - lowest_low) / (highest_high - lowest_low + 1e-9)
+        df['stoch_k'] = raw_k.clip(0, 100)
+        df['stoch_d'] = df['stoch_k'].rolling(window=3, min_periods=1).mean()
 
         # Average True Range (ATR 14)
         high = df['high']
@@ -131,13 +139,15 @@ class AnalyticsEngine:
         macd_hist = float(last_row['macd_hist'])
         bb_upper = float(last_row['bb_upper'])
         bb_lower = float(last_row['bb_lower'])
+        stoch_k = float(last_row.get('stoch_k', 50))
+        stoch_d = float(last_row.get('stoch_d', 50))
         atr = float(last_row['atr_14'])
         volatility = float(last_row.get('volatility_30d', 0.15)) * 100.0
 
         score = 0
         reasons = []
 
-        # 1. Trend Direction Analysis
+        # Trend Direction Analysis
         if ema_9 > ema_21 and close > ema_9:
             trend = "BULLISH"
             score += 25
@@ -157,7 +167,7 @@ class AnalyticsEngine:
             score -= 15
             reasons.append("Trading below 50-period moving average.")
 
-        # 2. RSI Momentum
+        # RSI Momentum
         if rsi < 30:
             score += 30
             reasons.append(f"RSI is oversold at {rsi:.1f}, signaling potential mean-reversion bounce.")
@@ -168,7 +178,7 @@ class AnalyticsEngine:
             score += 10
             reasons.append(f"RSI at {rsi:.1f} shows sustained healthy momentum without overextension.")
 
-        # 3. MACD Momentum
+        # MACD Momentum
         if macd_line > macd_signal and macd_hist > 0:
             score += 20
             reasons.append("MACD histogram is positive with expanding bullish momentum.")
@@ -176,7 +186,7 @@ class AnalyticsEngine:
             score -= 20
             reasons.append("MACD line crossed below signal line, bearish momentum building.")
 
-        # 4. Bollinger Bands Extreme Rejection
+        # Bollinger Bands Extreme Rejection
         if close <= bb_lower:
             score += 15
             reasons.append("Price touching lower Bollinger Band; historically high probability of support.")
@@ -184,13 +194,22 @@ class AnalyticsEngine:
             score -= 15
             reasons.append("Price testing upper Bollinger Band resistance.")
 
-        # Calculate Support & Resistance from high/low window
+        # Stochastic confirmation
+        if stoch_k > 80 and stoch_d > 80:
+            score -= 10
+            reasons.append("Stochastic oscillator is overbought, increasing risk of pullback.")
+        elif stoch_k < 20 and stoch_d < 20:
+            score += 10
+            reasons.append("Stochastic oscillator is oversold, supporting bounce potential.")
+        elif 45 <= stoch_k <= 70:
+            score += 5
+            reasons.append("Stochastic oscillator is in healthy momentum range.")
+
+        # Support & Resistance from recent high/low window
         recent_window = df.tail(min(30, len(df)))
         support_level = float(recent_window['low'].min())
         resistance_level = float(recent_window['high'].max())
 
-        # Normalize score into Action & Confidence
-        # score range ~ -100 to +100
         clipped_score = max(-100, min(100, score))
         confidence = float(np.abs(clipped_score) * 0.45 + 50.0)
         confidence = min(96.0, round(confidence, 1))
@@ -247,12 +266,10 @@ class AnalyticsEngine:
         invested = float(pos_df['current_value'].sum())
         total_equity = cash + invested
 
-        # Concentration / Herfindahl-Hirschman metric
         weights = pos_df['current_value'] / (invested + 1e-9)
         hhi = float(np.sum(weights ** 2))
         diversification_score = max(0.0, min(100.0, round((1.0 - hhi) * 100.0, 1)))
 
-        # 95% Parametric VaR estimate (1-day) assuming daily market sigma ~ 1.5%
         daily_sigma = 0.015
         var_95 = round(invested * 1.645 * daily_sigma, 2)
 

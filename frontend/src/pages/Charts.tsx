@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Sparkles, 
-  TrendingUp, 
-  TrendingDown, 
-  ShieldCheck, 
-  AlertCircle, 
-  BarChart3, 
-  Activity, 
-  Sliders, 
+import {
+  Sparkles,
+  TrendingUp,
+  TrendingDown,
+  ShieldCheck,
+  AlertCircle,
+  BarChart3,
+  Activity,
+  Sliders,
   RefreshCw,
-  AlertTriangle 
+  AlertTriangle
 } from 'lucide-react';
 import { createChart, ColorType, IChartApi, ISeriesApi } from 'lightweight-charts';
 import { Bar, AISignals, Quote, formatINR, api } from '../services/api';
@@ -34,7 +34,8 @@ export const Charts: React.FC<ChartsProps> = ({
   const [showIndicators, setShowIndicators] = useState({
     sma20: true,
     ema9: true,
-    bollinger: false
+    bollinger: false,
+    stochastic: false
   });
 
   const fetchData = async () => {
@@ -57,7 +58,6 @@ export const Charts: React.FC<ChartsProps> = ({
     fetchData();
   }, [selectedSymbol]);
 
-  // Mount & Update TradingView Lightweight Chart
   useEffect(() => {
     if (!chartContainerRef.current || bars.length === 0) return;
 
@@ -95,7 +95,6 @@ export const Charts: React.FC<ChartsProps> = ({
 
     chartInstanceRef.current = chart;
 
-    // 1. Candlestick Series
     const candleSeries = chart.addCandlestickSeries({
       upColor: '#00C076',
       downColor: '#FF4D4F',
@@ -104,11 +103,10 @@ export const Charts: React.FC<ChartsProps> = ({
       wickDownColor: '#FF4D4F'
     });
 
-    // 2. Volume Series
     const volumeSeries = chart.addHistogramSeries({
       color: '#26a69a',
       priceFormat: { type: 'volume' },
-      priceScaleId: '',
+      priceScaleId: ''
     });
     volumeSeries.priceScale().applyOptions({
       scaleMargins: { top: 0.8, bottom: 0 }
@@ -131,7 +129,6 @@ export const Charts: React.FC<ChartsProps> = ({
     candleSeries.setData(formattedCandles);
     volumeSeries.setData(formattedVolume);
 
-    // 3. Technical Indicator Overlays
     if (showIndicators.sma20) {
       const smaSeries = chart.addLineSeries({
         color: '#F59E0B',
@@ -181,6 +178,29 @@ export const Charts: React.FC<ChartsProps> = ({
       lowerSeries.setData(lowerData);
     }
 
+    if (showIndicators.stochastic) {
+      const kSeries = chart.addLineSeries({
+        color: '#22C55E',
+        lineWidth: 1.5,
+        title: 'Stoch %K'
+      });
+      const dSeries = chart.addLineSeries({
+        color: '#F59E0B',
+        lineWidth: 1.5,
+        title: 'Stoch %D'
+      });
+
+      const kData = bars
+        .filter((b) => b.stoch_k !== undefined && b.stoch_k !== null)
+        .map((b) => ({ time: b.timestamp.split('T')[0], value: b.stoch_k! }));
+      const dData = bars
+        .filter((b) => b.stoch_d !== undefined && b.stoch_d !== null)
+        .map((b) => ({ time: b.timestamp.split('T')[0], value: b.stoch_d! }));
+
+      kSeries.setData(kData);
+      dSeries.setData(dData);
+    }
+
     chart.timeScale().fitContent();
 
     const handleResize = () => {
@@ -206,7 +226,6 @@ export const Charts: React.FC<ChartsProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Delayed Data Notice */}
       <div className="bg-dark-800/80 border border-slate-700/60 rounded-xl px-4 py-2 flex items-center justify-between text-xs text-slate-400">
         <div className="flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-trade-green" />
@@ -217,7 +236,6 @@ export const Charts: React.FC<ChartsProps> = ({
         </span>
       </div>
 
-      {/* Symbol Selector Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-dark-800 p-4 rounded-2xl border border-dark-700">
         <div className="flex items-center gap-3">
           <div className="font-mono text-xl font-bold text-white flex items-center gap-2">
@@ -230,7 +248,6 @@ export const Charts: React.FC<ChartsProps> = ({
           </div>
         </div>
 
-        {/* Quick Ticker Switcher */}
         <div className="flex flex-wrap items-center gap-1.5 font-mono">
           {['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'TATAMOTORS', 'SBIN', 'NIFTY50'].map((sym) => (
             <button
@@ -255,30 +272,30 @@ export const Charts: React.FC<ChartsProps> = ({
         </div>
       </div>
 
-      {/* Main Grid: TradingView Chart & AI Recommendations */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: TradingView Chart */}
         <div className="lg:col-span-2 bg-dark-800 p-5 rounded-2xl border border-dark-700 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2 text-xs">
               <span className="text-slate-400 font-semibold uppercase">TradingView Overlays:</span>
               <button
                 onClick={() => setShowIndicators(p => ({ ...p, sma20: !p.sma20 }))}
-                className={`px-2 py-0.5 rounded text-[11px] font-mono border ${showIndicators.sma20 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-dark-900 text-slate-500 border-dark-700'}`}
-              >
+                className={`px-2 py-0.5 rounded text-[11px] font-mono border ${showIndicators.sma20 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-dark-900 text-slate-500 border-dark-700'}`}>
                 SMA 20
               </button>
               <button
                 onClick={() => setShowIndicators(p => ({ ...p, ema9: !p.ema9 }))}
-                className={`px-2 py-0.5 rounded text-[11px] font-mono border ${showIndicators.ema9 ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' : 'bg-dark-900 text-slate-500 border-dark-700'}`}
-              >
+                className={`px-2 py-0.5 rounded text-[11px] font-mono border ${showIndicators.ema9 ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' : 'bg-dark-900 text-slate-500 border-dark-700'}`}>
                 EMA 9
               </button>
               <button
                 onClick={() => setShowIndicators(p => ({ ...p, bollinger: !p.bollinger }))}
-                className={`px-2 py-0.5 rounded text-[11px] font-mono border ${showIndicators.bollinger ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' : 'bg-dark-900 text-slate-500 border-dark-700'}`}
-              >
+                className={`px-2 py-0.5 rounded text-[11px] font-mono border ${showIndicators.bollinger ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' : 'bg-dark-900 text-slate-500 border-dark-700'}`}>
                 Bollinger Bands
+              </button>
+              <button
+                onClick={() => setShowIndicators(p => ({ ...p, stochastic: !p.stochastic }))}
+                className={`px-2 py-0.5 rounded text-[11px] font-mono border ${showIndicators.stochastic ? 'bg-green-500/20 text-green-300 border-green-500/40' : 'bg-dark-900 text-slate-500 border-dark-700'}`}>
+                Stochastic
               </button>
             </div>
             <div className="text-[11px] font-mono text-slate-400 flex items-center gap-1.5">
@@ -287,7 +304,6 @@ export const Charts: React.FC<ChartsProps> = ({
             </div>
           </div>
 
-          {/* Canvas Container */}
           <div className="bg-dark-900 rounded-xl p-2 border border-dark-700/80 overflow-hidden relative min-h-[380px]">
             {loading && (
               <div className="absolute inset-0 z-10 bg-dark-900/80 flex items-center justify-center text-slate-400 text-xs">
@@ -297,7 +313,6 @@ export const Charts: React.FC<ChartsProps> = ({
             <div ref={chartContainerRef} className="w-full h-[380px]" />
           </div>
 
-          {/* Sub-panel: RSI Indicator */}
           {bars.length > 0 && bars[bars.length - 1].rsi_14 !== undefined && (
             <div className="bg-dark-900/60 p-3 rounded-xl border border-dark-700/60 flex items-center justify-between text-xs font-mono">
               <div className="flex items-center gap-3">
@@ -316,7 +331,6 @@ export const Charts: React.FC<ChartsProps> = ({
           )}
         </div>
 
-        {/* Right: AI Trading Decision & Strategy Scorecard in INR */}
         <div className="bg-dark-800 p-6 rounded-2xl border border-dark-700 flex flex-col justify-between space-y-5">
           <div>
             <div className="flex items-center justify-between border-b border-dark-700/80 pb-3 mb-4">
@@ -331,7 +345,6 @@ export const Charts: React.FC<ChartsProps> = ({
 
             {signals ? (
               <div className="space-y-4 font-mono">
-                {/* Action Card */}
                 <div className="bg-dark-900 p-4 rounded-xl border border-dark-700/80 text-center">
                   <div className="text-[11px] text-slate-400 font-sans uppercase tracking-wider mb-1">
                     Algorithmic Recommendation
@@ -346,7 +359,6 @@ export const Charts: React.FC<ChartsProps> = ({
                   </div>
                 </div>
 
-                {/* Key Metrics */}
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="bg-dark-900/80 p-3 rounded-xl border border-dark-700/60">
                     <span className="text-[11px] text-slate-400 font-sans block">Trend Direction</span>
@@ -362,7 +374,6 @@ export const Charts: React.FC<ChartsProps> = ({
                   </div>
                 </div>
 
-                {/* Stop Loss & Take Profit Target in INR */}
                 <div className="bg-dark-900/80 p-3.5 rounded-xl border border-dark-700/60 space-y-2 text-xs">
                   <div className="flex justify-between items-center">
                     <span className="text-slate-400 font-sans">Suggested Stop-Loss (1.5x ATR):</span>
@@ -378,7 +389,6 @@ export const Charts: React.FC<ChartsProps> = ({
                   </div>
                 </div>
 
-                {/* Analytical Rationales */}
                 <div className="space-y-1.5 font-sans">
                   <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
                     Synthesized Evidence:
