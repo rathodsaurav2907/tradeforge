@@ -9,9 +9,12 @@ export const config = {
   refreshTokenExpiry: '7d',
   databaseUrl: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/tradeforge',
   analyticsUrl: process.env.ANALYTICS_URL || 'http://localhost:8000',
+  upstoxApiKey: process.env.UPSTOX_API_KEY || '',
+  upstoxApiSecret: process.env.UPSTOX_API_SECRET || '',
+  upstoxAccessToken: process.env.UPSTOX_ACCESS_TOKEN || '',
   currency: 'INR',
   currencySymbol: '₹',
-  defaultVirtualCash: 1000000.0, // ₹10,00,000 (10 Lakh INR starting virtual paper capital)
+  defaultVirtualCash: 1000000.0,
   corsOrigin: process.env.CORS_ORIGIN || '*',
   dataSourceAttribution: 'Permitted Exchange Educational & Delayed 15m Simulation Feed'
 };
